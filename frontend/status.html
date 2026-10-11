@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f5ef">
+    <title>Status pesanan — SUKAMOTO</title>
+    <link rel="stylesheet" href="./css/app.css">
+    <script src="./js/config.js"></script>
+    <script type="module" src="./js/status.js"></script>
+  </head>
+  <body class="subpage">
+    <header class="site-header">
+      <a class="wordmark" href="./index.html">SUKAMOTO<span>.</span></a>
+      <nav class="top-nav" aria-label="Navigasi utama"><a href="./index.html#packages">Paket</a><a href="./index.html#templates">Template</a></nav>
+      <a class="button button-dark button-small" href="./index.html">Kembali ke katalog</a>
+    </header>
+    <main class="status-main">
+      <p class="eyebrow">Pemesanan tanpa akun</p>
+      <h1>Perjalanan pesanan<br><em>Anda, sejauh ini.</em></h1>
+      <p class="status-lede">Masukkan referensi pesanan untuk melihat status terbaru. Halaman ini hanya menampilkan informasi minimum.</p>
+      <form id="status-form" class="lookup-form">
+        <label for="reference">Referensi pesanan</label>
+        <div class="lookup-row"><input id="reference" name="reference" required autocomplete="off" placeholder="Contoh: SKM-…"><button class="button button-dark" type="submit">Periksa status <span aria-hidden="true">↗</span></button></div>
+      </form>
+      <p id="status-message" class="state-message" role="status" aria-live="polite" hidden></p>
+      <section id="status-result" class="status-card" aria-live="polite" hidden>
+        <div class="status-card-top"><div><p class="eyebrow">Referensi pesanan</p><h2 id="status-reference"></h2></div><span id="status-pill" class="status-pill"></span></div>
+        <div class="status-details">
+          <div><span>Status pembayaran</span><strong id="payment-status"></strong></div>
+          <div><span>Undangan</span><strong id="invitation-status"></strong></div>
+        </div>
+        <p id="status-explanation" class="status-explanation"></p>
+        <a id="invitation-link" class="button button-dark" hidden target="_blank" rel="noopener noreferrer">Buka undangan <span aria-hidden="true">↗</span></a>
+        <div id="payment-panel" class="payment-panel" hidden>
+          <div><h3>Unggah bukti pembayaran</h3><p>File dikirim secara privat melalui API. Jangan bagikan URL file pembayaran.</p></div>
+          <form id="payment-form">
+            <label>Metode pembayaran<input name="method" required maxlength="80" placeholder="Contoh: transfer bank"></label>
+            <label>File bukti pembayaran<input name="proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></label>
+            <p id="payment-error" class="form-error" role="alert" hidden></p>
+            <button class="button button-dark" type="submit">Kirim bukti <span aria-hidden="true">↗</span></button>
+          </form>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer"><a class="wordmark" href="./index.html">SUKAMOTO<span>.</span></a><span>Informasi status bersumber dari server.</span></footer>
+  </body>
+</html>

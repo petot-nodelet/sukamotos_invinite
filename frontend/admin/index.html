@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f5ef">
+    <title>Dashboard admin — SUKAMOTO</title>
+    <link rel="stylesheet" href="../css/app.css">
+    <script src="../js/config.js"></script>
+    <script type="module" src="../js/admin.js"></script>
+  </head>
+  <body class="admin-page">
+    <header class="admin-header">
+      <a class="wordmark" href="../index.html">SUKAMOTO<span>.</span></a>
+      <div class="admin-header-actions"><span id="admin-user"></span><button id="logout-button" class="button button-outline button-small" type="button">Keluar</button></div>
+    </header>
+    <main class="admin-main">
+      <div class="admin-welcome"><div><p class="eyebrow">Ruang pengelola</p><h1>Pesanan &amp; <em>publikasi.</em></h1></div><button id="refresh-button" class="button button-outline" type="button">Muat ulang ↻</button></div>
+      <nav class="admin-tabs" aria-label="Bagian dashboard">
+        <button class="admin-tab is-active" data-tab="orders" type="button">Pesanan</button>
+        <button class="admin-tab" data-tab="templates" type="button">Template</button>
+        <button class="admin-tab" data-tab="packages" type="button">Paket</button>
+      </nav>
+      <section id="orders-panel" class="admin-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Antrean</p><h2>Daftar pesanan</h2></div>
+          <label class="filter-label">Filter status
+            <select id="order-filter"><option value="">Semua status</option><option value="pending_payment">Menunggu pembayaran</option><option value="payment_submitted">Bukti dikirim</option><option value="payment_verified">Terverifikasi</option><option value="in_progress">Diproses</option><option value="published">Terbit</option><option value="rejected">Ditolak</option><option value="cancelled">Dibatalkan</option></select>
+          </label>
+        </div>
+        <p id="admin-message" class="state-message" role="status" aria-live="polite" hidden></p>
+        <div class="table-wrap"><table><thead><tr><th>Referensi</th><th>Pelanggan</th><th>Paket / template</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody id="orders-body"></tbody></table></div>
+        <div id="orders-empty" class="empty-state" hidden><span class="empty-mark">✳</span><h3>Belum ada pesanan di sini.</h3><p>Pesanan baru akan muncul setelah tercatat di server.</p></div>
+        <div class="pagination"><button id="previous-page" class="button button-outline button-small" type="button">← Sebelumnya</button><span id="page-label"></span><button id="next-page" class="button button-outline button-small" type="button">Berikutnya →</button></div>
+      </section>
+      <section id="templates-panel" class="admin-panel" hidden>
+        <div class="panel-heading"><div><p class="eyebrow">Katalog</p><h2>Ketersediaan template</h2></div></div>
+        <p class="section-aside">Pembaruan hanya dilakukan melalui endpoint metadata template yang tersedia.</p>
+        <p id="templates-message" class="state-message" role="status" aria-live="polite" hidden></p>
+        <div id="admin-template-list" class="admin-template-list"></div>
+        <div id="templates-empty" class="empty-state" hidden><h3>Belum ada metadata template.</h3><p>Pastikan katalog telah dikonfigurasi di backend.</p></div>
+      </section>
+      <section id="packages-panel" class="admin-panel" hidden>
+        <div class="panel-heading"><div><p class="eyebrow">Konfigurasi bisnis</p><h2>Paket aktif</h2></div></div>
+        <div class="notice-card"><strong>Pengelolaan paket bersifat baca-saja.</strong><p>Kontrak API saat ini hanya menyediakan <code>GET /api/v1/packages</code>. Tidak tersedia endpoint perubahan paket, sehingga dashboard tidak menampilkan kontrol edit yang tidak dapat disimpan.</p></div>
+        <p id="packages-message" class="state-message" role="status" aria-live="polite" hidden></p>
+        <div id="admin-package-list" class="package-grid admin-package-grid"></div>
+      </section>
+      <aside id="order-detail" class="detail-drawer" aria-labelledby="detail-title" hidden>
+        <div class="detail-top"><div><p class="eyebrow">Informasi lengkap</p><h2 id="detail-title">Detail pesanan</h2></div><button id="close-detail" class="dialog-close" type="button" aria-label="Tutup detail">×</button></div>
+        <div id="detail-content"></div>
+      </aside>
+    </main>
+    <div id="confirm-dialog" class="confirm-overlay" hidden>
+      <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <p class="eyebrow">Konfirmasi tindakan</p><h2 id="confirm-title"></h2><p id="confirm-copy"></p>
+        <label id="confirm-note-label" hidden>Catatan<textarea id="confirm-note" rows="3" maxlength="500"></textarea></label>
+        <label id="confirm-slug-label" hidden>Slug undangan<input id="confirm-slug" maxlength="80" autocomplete="off"></label>
+        <div class="confirm-actions"><button id="confirm-cancel" class="button button-outline" type="button">Batal</button><button id="confirm-submit" class="button button-dark" type="button">Konfirmasi</button></div>
+      </section>
+    </div>
+  </body>
+</html>

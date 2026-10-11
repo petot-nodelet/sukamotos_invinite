@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f5ef">
+    <title>Admin masuk — SUKAMOTO</title>
+    <link rel="stylesheet" href="../css/app.css">
+    <script src="../js/config.js"></script>
+    <script type="module" src="../js/admin-login.js"></script>
+  </head>
+  <body class="admin-login-page">
+    <main class="login-card">
+      <a class="wordmark" href="../index.html">SUKAMOTO<span>.</span></a>
+      <p class="eyebrow">Ruang pengelola</p>
+      <h1>Selamat datang<br><em>kembali.</em></h1>
+      <p>Masuk untuk mengelola pesanan dan undangan.</p>
+      <form id="admin-login-form">
+        <label>Username<input name="username" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button class="button button-dark button-full" type="submit">Masuk ke dashboard <span aria-hidden="true">↗</span></button>
+      </form>
+      <a class="login-back" href="../index.html">← Kembali ke katalog</a>
+    </main>
+  </body>
+</html>
