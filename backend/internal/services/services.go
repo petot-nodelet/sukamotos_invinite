@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -32,9 +34,9 @@ var (
 )
 
 type Service struct {
-	db     *sql.DB
-	cfg    *config.Config
-	proofs *storage.ProofStore
+	db      *sql.DB
+	cfg     *config.Config
+	proofs  *storage.ProofStore
 	gallery *storage.GalleryStore
 }
 
@@ -505,6 +507,9 @@ func (s *Service) UploadGalleryPhotos(ref string, uploads []GalleryUpload) ([]st
 		cleanupNew()
 		return nil, fmt.Errorf("decode invitation data: %w", err)
 	}
+	if invitation == nil {
+		invitation = make(map[string]interface{})
+	}
 	invitation["gallery"] = urls
 	updatedJSON, err := json.Marshal(invitation)
 	if err != nil {
@@ -530,30 +535,63 @@ func (s *Service) UploadGalleryPhotos(ref string, uploads []GalleryUpload) ([]st
 
 func (s *Service) PublishedPhotoKey(key string) (string, error) {
 	var storageKey, publishedAt string
+	var expiresAt sql.NullString
 	err := s.db.QueryRow(`
-		SELECT gp.storage_key, i.published_at
+		SELECT gp.storage_key, i.published_at, gp.expires_at
 		FROM gallery_photos gp
 		JOIN invitations i ON i.order_id = gp.order_id
-		WHERE gp.storage_key = ? AND i.published = 1`, key).Scan(&storageKey, &publishedAt)
+		WHERE gp.storage_key = ? AND i.published = 1`, key).Scan(&storageKey, &publishedAt, &expiresAt)
 	if err == sql.ErrNoRows {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	if !parseTime(publishedAt).AddDate(0, 0, s.cfg.InvitationRetentionDays).After(time.Now().UTC()) {
+	expiry := parseTime(publishedAt).AddDate(0, 0, s.cfg.InvitationRetentionDays)
+	if expiresAt.Valid {
+		expiry = parseTime(expiresAt.String)
+	}
+	if expiry.IsZero() || !expiry.After(time.Now().UTC()) {
 		return "", ErrNotFound
 	}
 	return storageKey, nil
 }
 
+func (s *Service) OpenGalleryPhoto(key string) (*os.File, error) {
+	return s.gallery.Open(key)
+}
+
 func (s *Service) CleanupExpiredPhotos() error {
-	cutoff := time.Now().UTC().AddDate(0, 0, -s.cfg.InvitationRetentionDays).Format(time.RFC3339)
 	now := nowUTC()
-	rows, err := s.db.Query(`
-		SELECT storage_key FROM gallery_photos
-		WHERE (expires_at IS NOT NULL AND expires_at <= ?)
-		   OR (expires_at IS NULL AND created_at <= ?)`, now, cutoff)
+	cutoff := time.Now().UTC().AddDate(0, 0, -s.cfg.InvitationRetentionDays).Format(time.RFC3339)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`
+		SELECT gp.storage_key
+		FROM gallery_photos gp
+		WHERE (gp.expires_at IS NOT NULL AND gp.expires_at <= ?)
+		   OR (
+		        gp.expires_at IS NULL
+		        AND (
+		            (EXISTS (
+		                SELECT 1 FROM invitations i
+		                WHERE i.order_id = gp.order_id AND i.published = 1
+		            ) AND EXISTS (
+		                SELECT 1 FROM invitations i
+		                WHERE i.order_id = gp.order_id AND i.published = 1 AND i.published_at <= ?
+		            ))
+		            OR (
+		                NOT EXISTS (
+		                    SELECT 1 FROM invitations i
+		                    WHERE i.order_id = gp.order_id AND i.published = 1
+		                )
+		                AND gp.created_at <= ?
+		            )
+		        )
+		   )`, now, cutoff, cutoff)
 	if err != nil {
 		return err
 	}
@@ -570,27 +608,19 @@ func (s *Service) CleanupExpiredPhotos() error {
 		return err
 	}
 	if len(keys) == 0 {
-		return nil
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, key := range keys {
-		if _, err := tx.Exec(`DELETE FROM gallery_photos WHERE storage_key = ?`, key); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
+		return tx.Commit()
 	}
 	for _, key := range keys {
 		if err := s.gallery.Remove(key); err != nil {
 			return fmt.Errorf("remove expired gallery photo %q: %w", key, err)
 		}
 	}
-	return nil
+	for _, key := range keys {
+		if _, err := tx.Exec(`DELETE FROM gallery_photos WHERE storage_key = ?`, key); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ---------- Admin auth ----------
@@ -622,25 +652,30 @@ func (s *Service) AuthenticateAdmin(username, password string) (*models.Admin, e
 	return &a, nil
 }
 
-func (s *Service) CreateSession(adminID int64) (string, time.Time, error) {
+func (s *Service) CreateSession(adminID int64) (string, string, time.Time, error) {
 	id := uuid.NewString()
+	csrfBytes := make([]byte, 32)
+	if _, err := rand.Read(csrfBytes); err != nil {
+		return "", "", time.Time{}, fmt.Errorf("generate CSRF token: %w", err)
+	}
+	csrfToken := base64.RawURLEncoding.EncodeToString(csrfBytes)
 	expires := time.Now().UTC().Add(s.cfg.SessionDuration)
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, admin_id, expires_at, created_at)
-		VALUES (?, ?, ?, ?)`,
-		id, adminID, expires.Format(time.RFC3339), nowUTC())
+		INSERT INTO sessions (id, admin_id, csrf_token, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		id, adminID, csrfToken, expires.Format(time.RFC3339), nowUTC())
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
-	return id, expires, nil
+	return id, csrfToken, expires, nil
 }
 
 func (s *Service) GetSession(sessionID string) (*models.Session, *models.Admin, error) {
 	var sess models.Session
 	var expiresStr, createdStr string
 	err := s.db.QueryRow(`
-		SELECT id, admin_id, expires_at, created_at FROM sessions WHERE id = ?`, sessionID).
-		Scan(&sess.ID, &sess.AdminID, &expiresStr, &createdStr)
+		SELECT id, admin_id, csrf_token, expires_at, created_at FROM sessions WHERE id = ?`, sessionID).
+		Scan(&sess.ID, &sess.AdminID, &sess.CSRFToken, &expiresStr, &createdStr)
 	if err == sql.ErrNoRows {
 		return nil, nil, ErrUnauthorized
 	}
@@ -911,6 +946,7 @@ func (s *Service) PublishOrder(orderID int64, adminID int64, slug string) error 
 	}
 
 	ts := nowUTC()
+	photoExpiry := time.Now().UTC().AddDate(0, 0, s.cfg.InvitationRetentionDays).Format(time.RFC3339)
 	_, err = tx.Exec(`
 		INSERT INTO invitations (order_id, slug, template_id, published, published_at, created_at, updated_at)
 		VALUES (?, ?, ?, 1, ?, ?, ?)`,
@@ -919,6 +955,9 @@ func (s *Service) PublishOrder(orderID int64, adminID int64, slug string) error 
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return ErrSlugExists
 		}
+		return err
+	}
+	if _, err = tx.Exec(`UPDATE gallery_photos SET expires_at = ? WHERE order_id = ?`, photoExpiry, orderID); err != nil {
 		return err
 	}
 

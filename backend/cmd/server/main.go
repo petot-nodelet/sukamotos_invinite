@@ -111,13 +111,16 @@ func main() {
 		// Admin auth (stricter rate limit)
 		r.Route("/admin/auth", func(r chi.Router) {
 			r.Use(authRL.Middleware)
+			r.Use(middleware.CheckOrigin(cfg))
 			r.Post("/login", h.AdminLogin)
-			r.Post("/logout", h.AdminLogout)
+			r.With(middleware.RequireAdmin(svc, cfg), middleware.RequireCSRF(svc, cfg)).
+				Post("/logout", h.AdminLogout)
 		})
 
 		// Admin protected routes
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(middleware.RequireAdmin(svc, cfg))
+			r.Use(middleware.RequireCSRF(svc, cfg))
 
 			r.Get("/orders", h.AdminListOrders)
 			r.Get("/orders/{id}", h.AdminGetOrder)

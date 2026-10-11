@@ -4,6 +4,16 @@ Static HTML, CSS, and JavaScript frontend. No framework or npm dependencies are 
 
 ## Local development
 
+From the repository root, start both servers together:
+
+```sh
+./scripts/dev.sh
+```
+
+Open `http://localhost:3000` on this computer, or `http://<IP-komputer>:3000` from another device on the same network. The frontend binds to `0.0.0.0` by default for LAN testing; set `FRONTEND_HOST=127.0.0.1` to restrict it to the local computer. Press `Ctrl+C` to stop both servers. The script uses the default backend and frontend ports; configure `ADDR` or `FRONTEND_PORT` if those ports need to change. Ensure the computer firewall permits inbound connections on these ports.
+
+To run either server separately, use the commands below.
+
 Run the Go backend from `backend/` in one terminal:
 
 ```sh
@@ -28,7 +38,7 @@ For same-origin production hosting, `apiBaseUrl` defaults to `/api/v1`. Serve th
 - `js/api.js`: shared JSON/multipart client, timeout, response-envelope validation, error normalization, and endpoint methods.
 - `templates/`: all six original invitation designs plus `personalize.js`, the shared text-safe bridge used for previews and published invitations. The invitation CSS, effects, audio, galleries, flipbook and original scripts remain in their individual HTML files.
 
-The form loads `supported_fields` from `GET /api/v1/templates/{slug}` before accepting an order. The data-filled preview loads the selected demo in an iframe and sends form values with origin-checked `postMessage`; it does not place private values in the URL or persistent browser storage. Published data is embedded as JSON by the backend and applied using `textContent`. Prices and final order details are always displayed from API responses. Admin buttons are gated by order state for usability only; authorization remains a backend responsibility.
+The form loads `supported_fields` from `GET /api/v1/templates/{slug}` before accepting an order. Gallery photos are selected directly from the device, then uploaded as multipart data to `POST /api/v1/orders/{reference}/photos` after the order is created; clients do not need to provide image URLs. Photos that are not yet published expire from upload time, while published photos expire after `INVITATION_RETENTION_DAYS` from publication and are automatically deleted by the backend cleanup job. The data-filled preview loads the selected demo in an iframe and sends form values with origin-checked `postMessage`; it does not place private values in the URL or persistent browser storage. Published data is embedded as JSON by the backend and applied using `textContent`. Prices and final order details are always displayed from API responses. Admin buttons are gated by order state for usability only; authorization remains a backend responsibility.
 
 ## Integration constraints found in the current backend
 

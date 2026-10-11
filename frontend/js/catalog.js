@@ -212,7 +212,7 @@ function invitationFieldLabel(field) {
     event_date: "Tanggal acara",
     venue: "Lokasi acara",
     quote: "Kutipan",
-    gallery: "Galeri (URL gambar)",
+    gallery: "Foto galeri (unggah dari perangkat)",
     story: "Cerita pasangan",
     events: "Detail acara",
     guest_name: "Nama tamu (opsional)",
@@ -244,6 +244,33 @@ async function loadTemplateFields(slug) {
     for (const field of supported) {
       const label = document.createElement("label");
       label.append(document.createTextNode(invitationFieldLabel(field)));
+      if (field === "gallery") {
+        const input = document.createElement("input");
+        input.name = "invitation.gallery";
+        input.type = "file";
+        input.accept = "image/jpeg,image/png";
+        input.multiple = true;
+        const hint = make("small", "field-hint", "Pilih hingga 8 foto JPG atau PNG dari ponsel atau komputer. Maksimal 5 MB per foto.");
+        input.addEventListener("change", () => {
+          const files = [...input.files];
+          if (files.length > 8) {
+            input.setCustomValidity("Pilih maksimal 8 foto.");
+          } else if (files.some((file) => !["image/jpeg", "image/png"].includes(file.type))) {
+            input.setCustomValidity("Gunakan foto berformat JPG atau PNG.");
+          } else if (files.some((file) => file.size > 5 * 1024 * 1024)) {
+            input.setCustomValidity("Ukuran setiap foto maksimal 5 MB.");
+          } else {
+            input.setCustomValidity("");
+          }
+          hint.textContent = files.length
+            ? `${files.length} foto dipilih${files.length <= 3 ? `: ${files.map((file) => file.name).join(", ")}` : ""}`
+            : "Pilih hingga 8 foto JPG atau PNG dari ponsel atau komputer. Maksimal 5 MB per foto.";
+          input.reportValidity();
+        });
+        label.append(input, hint);
+        container.append(label);
+        continue;
+      }
       const input = ["story", "quote", "events"].includes(field)
         ? document.createElement("textarea")
         : document.createElement("input");
@@ -251,11 +278,9 @@ async function loadTemplateFields(slug) {
       input.maxLength = 2000;
       input.required = ["bride_name", "groom_name"].includes(field);
       if (field.endsWith("_date") || field === "event_date") input.type = "date";
-      if (field === "gallery" || field === "events") {
+      if (field === "events") {
         input.removeAttribute("type");
-        input.placeholder = field === "gallery"
-          ? "https://… (pisahkan beberapa URL dengan baris baru)"
-          : "Nama acara, tanggal dan lokasi";
+        input.placeholder = "Nama acara, tanggal dan lokasi";
       }
       label.append(input);
       container.append(label);
@@ -276,15 +301,14 @@ function collectInvitation(formData = new FormData(orderForm)) {
   for (const [key, rawValue] of formData.entries()) {
     if (!key.startsWith("invitation.")) continue;
     const field = key.slice("invitation.".length);
+    if (field === "gallery") continue;
     const value = String(rawValue).trim();
     if (!value) continue;
     if (field === "events") {
       events.push(...value.split(/\r?\n/).map((description) => description.trim()).filter(Boolean)
         .map((description) => ({ description })));
     } else {
-      invitation[field] = field === "gallery"
-        ? value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
-        : value;
+      invitation[field] = value;
     }
   }
   const eventDate = invitation.event_date || "";
@@ -350,7 +374,9 @@ orderForm.addEventListener("submit", async (event) => {
   orderError.hidden = true;
   const form = new FormData(orderForm);
   const invitation = collectInvitation(form);
+  const galleryFiles = form.getAll("invitation.gallery").filter((value) => value instanceof File && value.size > 0);
 
+  let createdOrder = null;
   try {
     if (!window.confirm("Buat pesanan dengan paket, desain, dan data undangan yang telah diisi?")) return;
     const result = await api.createOrder({
@@ -363,11 +389,19 @@ orderForm.addEventListener("submit", async (event) => {
       invitation,
       idempotency_key: orderIdempotencyKey,
     });
+    createdOrder = result.data;
+    if (galleryFiles.length) {
+      const photos = new FormData();
+      galleryFiles.forEach((file) => photos.append("photos", file, file.name));
+      await api.uploadGalleryPhotos(createdOrder.order_reference, photos);
+    }
     orderIdempotencyKey = "";
     showReceipt(result.data, result.data.payment_instructions);
   } catch (error) {
     const fieldMessages = Object.values(error.fields || {}).filter(Boolean);
-    orderError.textContent = fieldMessages.join(" ") || error.message;
+    orderError.textContent = createdOrder
+      ? `Pesanan ${createdOrder.order_reference} sudah tercatat, tetapi foto galeri belum berhasil diunggah. Tekan “Buat pesanan” lagi untuk mencoba kembali tanpa membuat pesanan baru. ${error.message}`
+      : fieldMessages.join(" ") || error.message;
     orderError.hidden = false;
   } finally {
     submitButton.disabled = false;

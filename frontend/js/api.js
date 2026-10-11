@@ -22,9 +22,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = "GET", body, signal, headers = {} } = {}) {
+async function request(path, { method = "GET", body, signal, headers = {}, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const abortFromCaller = () => controller.abort();
   signal?.addEventListener("abort", abortFromCaller, { once: true });
 
@@ -111,6 +111,8 @@ export const api = Object.freeze({
   orderStatus: (reference) => request(`/orders/${segment(reference)}`),
   uploadPayment: (reference, formData) =>
     request(`/orders/${segment(reference)}/payment`, { method: "POST", body: formData }),
+  uploadGalleryPhotos: (reference, formData) =>
+    request(`/orders/${segment(reference)}/photos`, { method: "POST", body: formData, timeoutMs: 120000 }),
   adminLogin: (data) => request("/admin/auth/login", { method: "POST", body: data }),
   adminLogout: () => request("/admin/auth/logout", { method: "POST" }),
   adminOrders: ({ status = "", page = 1, limit = 20 } = {}) => {

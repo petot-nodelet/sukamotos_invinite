@@ -205,6 +205,7 @@ input, textarea {
   font-size: 12px;
 }
 textarea { resize: vertical; }
+.field-hint { margin-top: 5px; display: block; color: var(--muted); font-size: 9px; line-height: 1.6; }
 .form-error { margin: 13px 0 0; font-size: 11px; }
 .privacy-note { margin: 12px 0 0; color: #88877e; font-size: 9px; text-align: center; }
 .receipt { margin: 22px 0; border-top: 1px solid var(--line); }

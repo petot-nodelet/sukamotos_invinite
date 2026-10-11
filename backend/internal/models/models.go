@@ -38,18 +38,18 @@ type Package struct {
 }
 
 type Template struct {
-	ID             int64           `json:"id"`
-	Slug           string          `json:"slug"`
-	Name           string          `json:"name"`
-	PackageSlug    string          `json:"package_slug"`
-	SourcePath     string          `json:"-"`
-	ThumbnailPath  string          `json:"thumbnail_url"`
-	DemoPath       string          `json:"demo_url"`
-	MetadataJSON   json.RawMessage `json:"-"`
-	SupportedFields []string       `json:"supported_fields,omitempty"`
-	Available      bool            `json:"available"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID              int64           `json:"id"`
+	Slug            string          `json:"slug"`
+	Name            string          `json:"name"`
+	PackageSlug     string          `json:"package_slug"`
+	SourcePath      string          `json:"-"`
+	ThumbnailPath   string          `json:"thumbnail_url"`
+	DemoPath        string          `json:"demo_url"`
+	MetadataJSON    json.RawMessage `json:"-"`
+	SupportedFields []string        `json:"supported_fields,omitempty"`
+	Available       bool            `json:"available"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type Admin struct {
@@ -78,10 +78,10 @@ type Order struct {
 	UpdatedAt          time.Time       `json:"updated_at"`
 
 	// Joined / computed fields for responses
-	PackageSlug   string `json:"package_slug,omitempty"`
-	TemplateSlug  string `json:"template_slug,omitempty"`
-	PaymentStatus string `json:"payment_status,omitempty"`
-	Published     bool   `json:"published,omitempty"`
+	PackageSlug   string  `json:"package_slug,omitempty"`
+	TemplateSlug  string  `json:"template_slug,omitempty"`
+	PaymentStatus string  `json:"payment_status,omitempty"`
+	Published     bool    `json:"published,omitempty"`
 	InvitationURL *string `json:"invitation_url,omitempty"`
 }
 
@@ -126,6 +126,7 @@ type AuditLog struct {
 type Session struct {
 	ID        string    `json:"id"`
 	AdminID   int64     `json:"admin_id"`
+	CSRFToken string    `json:"-"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
 }

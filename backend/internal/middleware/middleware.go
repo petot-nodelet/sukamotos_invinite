@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -43,12 +45,95 @@ func RequireAdmin(svc *services.Service, cfg *config.Config) func(http.Handler) 
 	}
 }
 
+// CheckOrigin rejects browser requests from origins outside the configured frontend
+// origins and the request's own host. Requests without an Origin header remain usable
+// by non-browser clients; state-changing admin requests are additionally token-checked.
+func CheckOrigin(cfg *config.Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !originAllowed(r, cfg.AllowedOrigins) {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Origin permintaan tidak diizinkan.")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireCSRF requires a session-bound double-submit token on unsafe methods.
+func RequireCSRF(svc *services.Service, cfg *config.Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isSafeMethod(r.Method) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !originAllowed(r, cfg.AllowedOrigins) {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Origin permintaan tidak diizinkan.")
+				return
+			}
+			sessionCookie, err := r.Cookie(cfg.SessionCookieName)
+			if err != nil || sessionCookie.Value == "" {
+				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi tidak valid atau telah berakhir.")
+				return
+			}
+			session, _, err := svc.GetSession(sessionCookie.Value)
+			if err != nil {
+				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi tidak valid atau telah berakhir.")
+				return
+			}
+
+			csrfCookie, err := r.Cookie(cfg.CSRFCookieName)
+			headerToken := r.Header.Get("X-CSRF-Token")
+			if err != nil || csrfCookie.Value == "" || headerToken == "" ||
+				len(headerToken) != len(csrfCookie.Value) ||
+				subtle.ConstantTimeCompare([]byte(headerToken), []byte(csrfCookie.Value)) != 1 ||
+				len(session.CSRFToken) != len(headerToken) ||
+				subtle.ConstantTimeCompare([]byte(headerToken), []byte(session.CSRFToken)) != 1 {
+				response.Error(w, http.StatusForbidden, "CSRF_INVALID", "Token keamanan permintaan tidak valid.")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func originAllowed(r *http.Request, allowedOrigins []string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil ||
+		parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	if parsed.Host == r.Host {
+		return parsed.Scheme == "http" || parsed.Scheme == "https"
+	}
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func isSafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Simple in-memory rate limiter (per IP). Suitable for single-instance MVP.
 type rateLimiter struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	visitors map[string]*visitor
-	rate    int
-	window  time.Duration
+	rate     int
+	window   time.Duration
 }
 
 type visitor struct {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sukamoto/wedding-invitation/internal/config"
@@ -36,20 +37,52 @@ func Open(cfg *config.Config) (*sql.DB, error) {
 }
 
 func Migrate(db *sql.DB, migrationsPath string) error {
-	content, err := os.ReadFile(filepath.Join(migrationsPath, "001_init.sql"))
+	entries, err := os.ReadDir(migrationsPath)
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("read migrations directory: %w", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version TEXT PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)`); err != nil {
+		return fmt.Errorf("create migration tracking table: %w", err)
 	}
 
-	if _, err := db.Exec(string(content)); err != nil {
-		return fmt.Errorf("exec migration: %w", err)
-	}
-	galleryMigration, err := os.ReadFile(filepath.Join(migrationsPath, "002_gallery_photos.sql"))
-	if err != nil {
-		return fmt.Errorf("read gallery migration: %w", err)
-	}
-	if _, err := db.Exec(string(galleryMigration)); err != nil {
-		return fmt.Errorf("exec gallery migration: %w", err)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+			continue
+		}
+		var applied int
+		if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = ?`, entry.Name()).Scan(&applied); err != nil {
+			return fmt.Errorf("check migration %s: %w", entry.Name(), err)
+		}
+		if applied != 0 {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(migrationsPath, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %s: %w", entry.Name(), err)
+		}
+		if strings.TrimSpace(string(content)) != "" {
+			if _, err := tx.Exec(string(content)); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("exec migration %s: %w", entry.Name(), err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			entry.Name(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record migration %s: %w", entry.Name(), err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", entry.Name(), err)
+		}
 	}
 	return nil
 }

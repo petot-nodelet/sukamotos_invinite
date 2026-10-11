@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sukamoto/wedding-invitation/internal/config"
@@ -120,9 +122,18 @@ func (h *Handler) GetOrderStatus(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SubmitPayment(w http.ResponseWriter, r *http.Request) {
 	ref := chi.URLParam(r, "reference")
 
-	if err := r.ParseMultipartForm(h.cfg.MaxUploadBytes + 1024); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxUploadBytes+(64<<10))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			response.Error(w, http.StatusRequestEntityTooLarge, "PAYMENT_PROOF_INVALID", "Ukuran bukti pembayaran terlalu besar.")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Form tidak valid atau file terlalu besar.")
 		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 
 	method := r.FormValue("method")
@@ -155,6 +166,97 @@ func (h *Handler) SubmitPayment(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]string{
 		"status": "payment_submitted",
 	})
+}
+
+// POST /api/v1/orders/{reference}/photos
+func (h *Handler) UploadGalleryPhotos(w http.ResponseWriter, r *http.Request) {
+	ref := chi.URLParam(r, "reference")
+	maxRequestBytes := h.cfg.MaxUploadBytes*8 + (1 << 20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			response.Error(w, http.StatusRequestEntityTooLarge, "GALLERY_PHOTOS_INVALID", "Ukuran foto galeri terlalu besar.")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Form unggahan foto tidak valid.")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	files := r.MultipartForm.File["photos"]
+	if len(files) == 0 || len(files) > 8 {
+		response.Error(w, http.StatusUnprocessableEntity, "GALLERY_PHOTOS_INVALID", "Pilih 1 sampai 8 foto.")
+		return
+	}
+
+	uploads := make([]services.GalleryUpload, 0, len(files))
+	opened := make([]io.Closer, 0, len(files))
+	defer func() {
+		for _, file := range opened {
+			_ = file.Close()
+		}
+	}()
+	for _, header := range files {
+		file, err := header.Open()
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "GALLERY_PHOTOS_INVALID", "Foto galeri tidak dapat dibaca.")
+			return
+		}
+		opened = append(opened, file)
+		uploads = append(uploads, services.GalleryUpload{Reader: file})
+	}
+
+	urls, err := h.svc.UploadGalleryPhotos(ref, uploads)
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrNotFound):
+			response.Error(w, http.StatusNotFound, "ORDER_NOT_FOUND", "Pesanan tidak ditemukan.")
+		case errors.Is(err, services.ErrInvalidTransition):
+			response.Error(w, http.StatusConflict, "INVALID_STATUS_TRANSITION", "Foto tidak dapat diubah pada status pesanan ini.")
+		case errors.Is(err, services.ErrValidation):
+			response.Error(w, http.StatusUnprocessableEntity, "GALLERY_PHOTOS_INVALID", err.Error())
+		default:
+			response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Gagal menyimpan foto galeri.")
+		}
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"photos": urls})
+}
+
+// GET /media/{key}; only photos belonging to published invitations are served.
+func (h *Handler) ServeInvitationPhoto(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "key")
+	storageKey, err := h.svc.PublishedPhotoKey(key)
+	if err != nil {
+		if errors.Is(err, services.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Gagal mengambil foto undangan.")
+		return
+	}
+	file, err := h.svc.OpenGalleryPhoto(storageKey)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.NotFound(w, r)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Gagal mengambil foto undangan.")
+		return
+	}
+	defer file.Close()
+
+	contentType := mime.TypeByExtension(filepath.Ext(storageKey))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "inline")
+	http.ServeContent(w, r, filepath.Base(storageKey), time.Time{}, file)
 }
 
 // GET /api/v1/invitations/{slug}
@@ -289,7 +391,7 @@ func (h *Handler) AdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, expires, err := h.svc.CreateSession(admin.ID)
+	sessionID, csrfToken, expires, err := h.svc.CreateSession(admin.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Gagal membuat sesi.")
 		return
@@ -304,6 +406,15 @@ func (h *Handler) AdminLogin(w http.ResponseWriter, r *http.Request) {
 		Secure:   r.TLS != nil, // true behind HTTPS
 		SameSite: http.SameSiteLaxMode,
 	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     h.cfg.CSRFCookieName,
+		Value:    csrfToken,
+		Path:     "/",
+		Expires:  expires,
+		HttpOnly: false,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"username": admin.Username,
@@ -315,7 +426,10 @@ func (h *Handler) AdminLogin(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(h.cfg.SessionCookieName)
 	if err == nil && cookie.Value != "" {
-		_ = h.svc.DeleteSession(cookie.Value)
+		if err := h.svc.DeleteSession(cookie.Value); err != nil {
+			response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Gagal mengakhiri sesi.")
+			return
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.cfg.SessionCookieName,
@@ -323,6 +437,15 @@ func (h *Handler) AdminLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     h.cfg.CSRFCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
 	response.NoContent(w)

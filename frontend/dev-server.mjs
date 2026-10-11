@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.FRONTEND_PORT || 3000);
+const host = process.env.FRONTEND_HOST || "0.0.0.0";
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -57,6 +58,6 @@ createServer(async (request, response) => {
     console.error("Static frontend server error:", error);
     response.writeHead(500).end("Internal server error");
   }
-}).listen(port, "127.0.0.1", () => {
-  console.log(`Frontend dev server listening at http://localhost:${port}`);
+}).listen(port, host, () => {
+  console.log(`Frontend dev server listening on ${host}:${port}`);
 });

@@ -272,6 +272,27 @@ Aturan:
 
 Status berubah menjadi `payment_submitted` setelah validasi dan penyimpanan berhasil.
 
+### POST /api/v1/orders/{reference}/photos
+
+Mengunggah atau mengganti foto galeri pesanan menggunakan `multipart/form-data`. Kirim 1 sampai 8 file pada field berulang `photos`. Setiap file harus berupa JPEG atau PNG, tidak melebihi `MAX_UPLOAD_MB`, dan memiliki dimensi maksimum 40 megapiksel. Unggahan ditolak untuk pesanan yang sudah diterbitkan, ditolak, atau dibatalkan.
+
+Respons berhasil berisi URL media:
+
+```
+{
+  "success": true,
+  "data": {
+    "photos": ["/media/random-storage-key.jpg"]
+  }
+}
+```
+
+Foto hanya dapat diakses melalui endpoint media setelah undangan terkait diterbitkan. Foto draft yang belum diterbitkan dihapus setelah `INVITATION_RETENTION_DAYS` sejak diunggah. Saat undangan diterbitkan, masa retensi foto dimulai ulang dari waktu publikasi dan seluruh file foto serta referensi databasenya dihapus otomatis setelah periode tersebut.
+
+### GET /media/{key}
+
+Mengambil satu foto galeri jika foto tersebut terkait dengan undangan yang sudah diterbitkan dan belum kedaluwarsa. Foto draft, file yang tidak dikenal, dan file yang kedaluwarsa tidak disajikan.
+
 ### GET /api/v1/invitations/{slug}
 
 Mengembalikan data undangan publik yang sudah diterbitkan.
@@ -325,6 +346,8 @@ Keamanan:
 
 - Gunakan password hashing yang sesuai.
 - Gunakan cookie sesi `HttpOnly`, `Secure` di HTTPS, dan `SameSite` yang sesuai.
+- Login juga memberikan cookie CSRF yang dapat dibaca frontend. Sertakan nilainya pada header `X-CSRF-Token` untuk setiap operasi admin yang mengubah data.
+- Backend mencocokkan header dan cookie CSRF dengan token acak yang terikat ke sesi, serta menolak origin browser yang tidak diizinkan.
 - Regenerasi ID sesi setelah login.
 - Terapkan rate limiting.
 - Jangan mengembalikan password atau hash password.
@@ -549,6 +572,7 @@ Jika frontend dan backend disajikan dari origin yang sama, gunakan same-origin d
 Jika origin berbeda saat pengembangan, izinkan hanya origin pengembangan yang dikonfigurasi secara eksplisit.
 
 Untuk endpoint admin berbasis cookie, terapkan perlindungan CSRF. Jangan mengandalkan CORS sebagai satu-satunya perlindungan CSRF.
+Implementasi ini menerbitkan token CSRF acak per sesi saat login, menyimpannya bersama sesi, dan mewajibkan kecocokan cookie/header pada operasi admin yang mengubah data. Cookie CSRF dihapus saat logout.
 
 Endpoint publik juga harus memiliki batas ukuran request, validasi, dan rate limiting yang sesuai.
 
