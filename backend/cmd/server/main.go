@@ -73,8 +73,6 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
 
 	// CORS — only if frontend is on a different origin during development
 	r.Use(cors.Handler(cors.Options{
@@ -115,9 +113,10 @@ func main() {
 			r.Post("/logout", h.AdminLogout)
 		})
 
-		// Admin protected routes
+		// Admin protected routes (session cookie + CSRF double-submit)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(middleware.RequireAdmin(svc, cfg))
+			r.Use(middleware.ValidateCSRF(cfg))
 
 			r.Get("/orders", h.AdminListOrders)
 			r.Get("/orders/{id}", h.AdminGetOrder)

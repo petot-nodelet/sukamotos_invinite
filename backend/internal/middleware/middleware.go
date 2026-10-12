@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"net/http"
 	"sync"
 	"time"
@@ -39,6 +42,56 @@ func RequireAdmin(svc *services.Service, cfg *config.Config) func(http.Handler) 
 			}
 			ctx := context.WithValue(r.Context(), AdminContextKey, admin)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// IssueCSRFCookie sets a readable double-submit CSRF cookie for an
+// authenticated admin session. The frontend JS reads it and echoes the value
+// in the X-CSRF-Token header on state-changing requests.
+func IssueCSRFCookie(w http.ResponseWriter, cfg *config.Config) error {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     cfg.CSRFCookieName,
+		Value:    hex.EncodeToString(buf),
+		Path:     "/",
+		HttpOnly: false, // must be readable by the admin frontend JS
+		Secure:   cfg.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+	return nil
+}
+
+// ValidateCSRF enforces the double-submit pattern: unsafe methods from
+// cookie-authenticated admins must carry an X-CSRF-Token header matching the
+// CSRF cookie. Requests without a session cookie (e.g. public endpoints or
+// curl usage) pass through; browser-based admin requests always send both.
+func ValidateCSRF(cfg *config.Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				next.ServeHTTP(w, r)
+				return
+			}
+			sessionCookie, err := r.Cookie(cfg.SessionCookieName)
+			if err != nil || sessionCookie.Value == "" {
+				// Not a cookie-authenticated admin request; auth middleware
+				// will reject it downstream if needed.
+				next.ServeHTTP(w, r)
+				return
+			}
+			csrfCookie, err := r.Cookie(cfg.CSRFCookieName)
+			token := r.Header.Get("X-CSRF-Token")
+			if err != nil || csrfCookie.Value == "" || token == "" ||
+				subtle.ConstantTimeCompare([]byte(token), []byte(csrfCookie.Value)) != 1 {
+				response.Error(w, http.StatusForbidden, "CSRF_VALIDATION_FAILED", "Token CSRF tidak valid. Muat ulang halaman admin dan coba lagi.")
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

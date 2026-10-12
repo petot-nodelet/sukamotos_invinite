@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -528,23 +529,32 @@ func (s *Service) UploadGalleryPhotos(ref string, uploads []GalleryUpload) ([]st
 	return urls, nil
 }
 
-func (s *Service) PublishedPhotoKey(key string) (string, error) {
-	var storageKey, publishedAt string
+// OpenPublishedPhoto opens a gallery photo only when it belongs to an order
+// whose invitation is currently published and still within the retention
+// window. It returns ErrNotFound for unknown keys, unpublished orders, and
+// expired invitations so callers can respond with a plain 404.
+func (s *Service) OpenPublishedPhoto(key string) (*os.File, error) {
+	var storageKey string
+	var publishedAt sql.NullString
 	err := s.db.QueryRow(`
-		SELECT gp.storage_key, i.published_at
+		SELECT gp.storage_key
 		FROM gallery_photos gp
 		JOIN invitations i ON i.order_id = gp.order_id
 		WHERE gp.storage_key = ? AND i.published = 1`, key).Scan(&storageKey, &publishedAt)
 	if err == sql.ErrNoRows {
-		return "", ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if !parseTime(publishedAt).AddDate(0, 0, s.cfg.InvitationRetentionDays).After(time.Now().UTC()) {
-		return "", ErrNotFound
+	if !publishedAt.Valid || !parseTime(publishedAt.String).AddDate(0, 0, s.cfg.InvitationRetentionDays).After(time.Now().UTC()) {
+		return nil, ErrNotFound
 	}
-	return storageKey, nil
+	f, err := s.gallery.Open(storageKey)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	return f, nil
 }
 
 func (s *Service) CleanupExpiredPhotos() error {

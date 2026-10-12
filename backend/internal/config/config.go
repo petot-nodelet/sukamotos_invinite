@@ -22,6 +22,7 @@ type Config struct {
 	InvitationRetentionDays int
 	AllowedOrigins    []string
 	BaseURL           string // used for invitation_url construction
+	CookieSecure      bool   // set Secure flag on session/CSRF cookies (behind TLS reverse proxy)
 }
 
 func Load() *Config {
@@ -41,6 +42,7 @@ func Load() *Config {
 		InvitationRetentionDays: getEnvInt("INVITATION_RETENTION_DAYS", 365),
 		AllowedOrigins:    []string{getEnv("ALLOWED_ORIGIN", "http://localhost:3000")},
 		BaseURL:           getEnv("BASE_URL", "http://localhost:8080"),
+		CookieSecure:      getEnvBool("COOKIE_SECURE", false),
 	}
 }
 
@@ -55,6 +57,15 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback
